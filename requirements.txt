@@ -1,0 +1,5 @@
+baostock==0.9.3
+cryptography==46.0.0
+numpy==2.3.5
+pandas==2.2.3
+
