@@ -1,0 +1,65 @@
+name: Sealed Public Market Data Fetch
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Opaque 32-character job identifier
+        required: true
+        type: string
+      sealed_job_b64:
+        description: AES-GCM sealed request (base64 transport)
+        required: true
+        type: string
+      sealed_job_sha256:
+        description: SHA-256 of the decoded sealed request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sealed-public-data-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        group: [0, 1, 2, 3, 4, 5]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - name: Check out the immutable public worker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install pinned runtime dependencies
+        run: >-
+          python3 -m pip install --disable-pip-version-check --no-cache-dir
+          --only-binary=:all: --requirement requirements.txt
+      - name: Fetch and seal raw public market data
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          SEALED_JOB_B64: ${{ inputs.sealed_job_b64 }}
+          SEALED_JOB_SHA256: ${{ inputs.sealed_job_sha256 }}
+          SEALED_JOB_KEY_B64: ${{ secrets.SEALED_JOB_KEY_B64 }}
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python3 scripts/run_sealed_job.py \
+            --job-id "$JOB_ID" \
+            --group "${{ matrix.group }}" \
+            --output-dir sealed-output
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sealed-result-${{ inputs.job_id }}-g${{ matrix.group }}
+          path: sealed-output/*.asr
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
